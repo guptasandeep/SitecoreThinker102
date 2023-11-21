@@ -1,54 +1,32 @@
-using Microsoft.Extensions.DependencyInjection;
-using Sitecore.Configuration;
-using Sitecore.Data.Fields;
 using Sitecore.Data.Items;
-using Sitecore.DependencyInjection;
 using Sitecore.Diagnostics;
-using Sitecore.IO;
-using Sitecore.Links.UrlBuilders;
 using Sitecore.Pipelines.HttpRequest;
-using Sitecore.SecurityModel;
-using Sitecore.Web;
 using Sitecore.XA.Feature.SiteMetadata.Enums;
-using Sitecore.XA.Feature.SiteMetadata.Services;
-using Sitecore.XA.Feature.SiteMetadata.Sitemap;
-using Sitecore.XA.Foundation.Abstractions;
-using Sitecore.XA.Foundation.Abstractions.Configuration;
-using Sitecore.XA.Foundation.Multisite;
+using Sitecore.XA.Feature.SiteMetadata.Pipelines.HttpRequestBegin;
 using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
 using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
+using Microsoft.Extensions.DependencyInjection;
 using System;
-using System.Collections.Specialized;
 using System.IO;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
-using System.Web.Caching;
+using Sitecore.DependencyInjection;
+using System.Collections.Specialized;
+using Sitecore.Web;
+using System.Collections;
+using Sitecore.IO;
+using Sitecore.XA.Feature.SiteMetadata.Sitemap;
+using SitecoreThinker.Feature.SEO.Sitemap;
 
-namespace Sitecore.XA.Feature.SiteMetadata.Pipelines.HttpRequestBegin
+namespace SitecoreThinker.Feature.SEO.Pipelines
 {
-    public class SitemapHandler : HttpRequestProcessor
+    public class CustomSitemapHandler : SitemapHandler
     {
-        protected SiteMetadataConfiguration Configuration = ServiceProviderServiceExtensions.GetService<IConfiguration<SiteMetadataConfiguration>>(ServiceLocator.ServiceProvider).GetConfiguration();
-
-        protected SiteInfo CurrentSite => this.Context.Site.SiteInfo;
-
-        protected string FilePath => Path.Combine(TempFolder.Folder, "sitemap-" + this.CurrentSite.Name + ".xml");
-
-        protected string CacheKey => string.Format("{0}/{1}/{2}/{3}", (object)"XA-SITEMAP", (object)this.Context.Database?.Name, (object)this.CurrentSite.Name, (object)HttpContext.Current.Request.Url);
-
-        public int CacheExpiration { set; get; }
-
-        protected IContext Context { get; } = ServiceProviderServiceExtensions.GetService<IContext>(ServiceLocator.ServiceProvider);
-
-        protected IUrlOptionsProvider UrlOptionsProvider { get; } = ServiceProviderServiceExtensions.GetService<IUrlOptionsProvider>(ServiceLocator.ServiceProvider);
-
         public override void Process(HttpRequestArgs args)
         {
             Uri url = HttpContext.Current.Request.Url;
-            if (!url.PathAndQuery.EndsWith("/sitemap.xml", StringComparison.OrdinalIgnoreCase) && !url.PathAndQuery.EndsWith("/local-sitemap.xml", StringComparison.OrdinalIgnoreCase))
+            if (!IsSiteMapRequest(url))
                 return;
             if (this.CurrentSite == null || !this.IsUrlValidForSitemapFiles(url))
             {
@@ -69,7 +47,22 @@ namespace Sitecore.XA.Feature.SiteMetadata.Pipelines.HttpRequestBegin
                         if (string.IsNullOrEmpty(sitemap))
                         {
                             sitemap = this.GetSitemap(settingsItem);
-                            this.StoreSitemapInCache(sitemap, this.CacheKey);
+                            if (!SiteMapValidator.IsSiteMapValid(sitemap))
+                            {
+                                Hashtable siteMapIndexAndSiteMaps = this.GetSitemapIndexAndSiteMaps(settingsItem);
+                                sitemap = (string)siteMapIndexAndSiteMaps["sitemap.xml"];
+                                foreach (var key in siteMapIndexAndSiteMaps.Keys)
+                                {
+                                    if (string.Equals((string)key, GetSiteMapFileName(), StringComparison.OrdinalIgnoreCase))
+                                        sitemap = Convert.ToString(siteMapIndexAndSiteMaps[key]);
+                                    this.StoreSitemapInCache(Convert.ToString(siteMapIndexAndSiteMaps[key]), this.CacheKey.Replace("sitemap.xml", Convert.ToString(key)));
+                                }
+                            }
+                            else
+                            {
+                                this.StoreSitemapInCache(sitemap, this.CacheKey);
+                            }
+
                             break;
                         }
                         break;
@@ -77,9 +70,23 @@ namespace Sitecore.XA.Feature.SiteMetadata.Pipelines.HttpRequestBegin
                         sitemap = this.GetSitemapFromFile();
                         if (string.IsNullOrEmpty(sitemap))
                         {
-                            sitemap = this.GetSitemap(settingsItem);
-                            string filePath = this.FilePath;
-                            Task.Factory.StartNew((Action)(() => this.SaveSitemapToFile(filePath, sitemap)), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+                            sitemap = this.GetNestedSitemapFromFile($"{this.CurrentSite.Name}{this.GetSiteMapFileName()}"); //serve from the file if exists
+                            if (string.IsNullOrEmpty(sitemap))
+                            {
+                                sitemap = this.GetSitemap(settingsItem); //Default
+                                if (!SiteMapValidator.IsSiteMapValid(sitemap))
+                                {
+                                    Hashtable siteMapIndexAndSiteMaps = this.GetSitemapIndexAndSiteMaps(settingsItem);
+                                    sitemap = (string)siteMapIndexAndSiteMaps["sitemap.xml"];
+                                    foreach (var key in siteMapIndexAndSiteMaps.Keys)
+                                    {
+                                        if (string.Equals((string)key, GetSiteMapFileName(), StringComparison.OrdinalIgnoreCase))
+                                            sitemap = Convert.ToString(siteMapIndexAndSiteMaps[key]);
+                                        string filePath = Path.Combine(TempFolder.Folder, this.CurrentSite.Name + key);
+                                        Task.Factory.StartNew((Action)(() => this.SaveSitemapToFile(filePath, Convert.ToString(siteMapIndexAndSiteMaps[key]))), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+                                    }
+                                }
+                            }
                             break;
                         }
                         break;
@@ -89,116 +96,62 @@ namespace Sitecore.XA.Feature.SiteMetadata.Pipelines.HttpRequestBegin
                 }
                 this.SetResponse(args.HttpContext.Response, (object)sitemap);
                 args.AbortPipeline();
+
             }
         }
 
-        protected virtual bool IsUrlValidForSitemapFiles(Uri url) => UrlUtils.IsUrlValidForFile(url, this.CurrentSite, "/sitemap.xml") || UrlUtils.IsUrlValidForFile(url, this.CurrentSite, "/local-sitemap.xml");
-
-        protected virtual Item GetHomeItem()
+        protected virtual bool IsSiteMapRequest(Uri url)
         {
-            using (new SecurityDisabler())
-                return Factory.GetDatabase(this.Context.Database.Name).GetItem(this.CurrentSite.RootPath + this.CurrentSite.StartItem);
+            if (!url.PathAndQuery.EndsWith("/sitemap.xml", StringComparison.OrdinalIgnoreCase) && !url.PathAndQuery.EndsWith("/local-sitemap.xml", StringComparison.OrdinalIgnoreCase) && !SiteMapValidator.IsNestedSiteMap(HttpContext.Current.Request.Url.PathAndQuery))
+                return false;
+            return true;
         }
 
-        protected virtual SitemapLinkOptions GetLinkBuilderOptions()
+        protected override bool IsUrlValidForSitemapFiles(Uri url)
         {
-            Uri url = HttpContext.Current.Request.Url;
-            string targetHostname = this.CurrentSite.ResolveTargetHostName();
-            ItemUrlBuilderOptions urlOptions = this.UrlOptionsProvider.GetUrlOptions();
-            return this.CurrentSite.Scheme.IsNullOrWhiteSpace() ? new SitemapLinkOptions(url, targetHostname, urlOptions) : new SitemapLinkOptions(this.CurrentSite.Scheme, urlOptions, targetHostname);
+            if (base.IsUrlValidForSitemapFiles(url))
+                return true;
+            string vurl = HttpContext.Current.Request.Url.PathAndQuery;
+            int lastIndex = vurl.LastIndexOf("/");
+            if (lastIndex < 0)
+                return false;
+            if (vurl.Length > vurl.LastIndexOf("/") + 1)
+            {
+                string sitemapFileName = vurl.Substring(vurl.LastIndexOf("/") + 1);
+                return UrlUtils.IsUrlValidForFile(url, this.CurrentSite, $"/{sitemapFileName}");
+            }
+            return false;
         }
 
-        protected virtual string GetSitemap(Item settings)
+        protected Hashtable GetSitemapIndexAndSiteMaps(Item settings)
         {
+            Hashtable siteMapIndexAndSiteMaps = new Hashtable();
             Uri url = HttpContext.Current.Request.Url;
-            ISitemapGenerator service = ServiceProviderServiceExtensions.GetService<ISitemapGenerator>(ServiceLocator.ServiceProvider);
-            if (url.PathAndQuery.EndsWith("/local-sitemap.xml", StringComparison.OrdinalIgnoreCase))
-                return service.GenerateSitemap(this.GetHomeItem(), new NameValueCollection(), this.GetLinkBuilderOptions());
+            CustomSitemapGenerator service = (CustomSitemapGenerator)ServiceProviderServiceExtensions.GetService<ISitemapGenerator>(ServiceLocator.ServiceProvider);
+            //Build SiteMap having the local sitemap and external sitemap urls merged
             NameValueCollection urlParameters = WebUtil.ParseUrlParameters(settings[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._SitemapSettings.Fields.ExternalSitemaps]);
-            if (!((CheckboxField)settings.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._SitemapSettings.Fields.SitemapIndex]).Checked)
-                return service.GenerateSitemap(this.GetHomeItem(), urlParameters, this.GetLinkBuilderOptions());
-            NameValueCollection nameValueCollection = new NameValueCollection();
-            nameValueCollection.Add(Guid.NewGuid().ToString(), url.AbsoluteUri.Replace("/sitemap.xml", "/local-sitemap.xml"));
-            nameValueCollection.Merge(urlParameters);
-            return service.BuildSitemapIndex(nameValueCollection);
+            siteMapIndexAndSiteMaps = service.GenerateSitemapIndex(this.GetHomeItem(), urlParameters, this.GetLinkBuilderOptions());
+            return siteMapIndexAndSiteMaps;
         }
 
-        protected virtual Item GetSettingsItem()
+        protected string GetSiteMapFileName()
         {
-            using (new SecurityDisabler())
-                return ServiceProviderServiceExtensions.GetService<IMultisiteContext>(ServiceLocator.ServiceProvider).GetSettingsItem(this.Context.Database.GetItem(this.Context.Site.StartPath));
+            string url = HttpContext.Current.Request.Url.PathAndQuery;
+            int lastIndex = url.LastIndexOf("/");
+            if (lastIndex < 0)
+                return "";
+            return url.Substring(url.LastIndexOf("/") + 1);
         }
 
-        protected virtual string GetSitemapFromCache()
-        {
-            string sitemapFromCache = (string)null;
-            if (System.Web.HttpRuntime.Cache[this.CacheKey] != null)
-                sitemapFromCache = System.Web.HttpRuntime.Cache.Get(this.CacheKey) as string;
-            return sitemapFromCache;
-        }
-
-        protected virtual void StoreSitemapInCache(string sitemap, string cacheKey) => System.Web.HttpRuntime.Cache.Insert(cacheKey, (object)sitemap, (CacheDependency)null, DateTime.UtcNow.AddMinutes((double)this.CacheExpiration), Cache.NoSlidingExpiration);
-
-        protected virtual string GetSitemapFromFile()
+        protected string GetNestedSitemapFromFile(string fileName)
         {
             string sitemapFromFile = (string)null;
-            if (FileUtil.Exists(this.FilePath))
+            if (FileUtil.Exists(Path.Combine(TempFolder.Folder, fileName)))
             {
-                using (StreamReader streamReader = new StreamReader((Stream)FileUtil.OpenRead(this.FilePath)))
+                using (StreamReader streamReader = new StreamReader((Stream)FileUtil.OpenRead(Path.Combine(TempFolder.Folder, fileName))))
                     sitemapFromFile = streamReader.ReadToEnd();
             }
             return sitemapFromFile;
-        }
-
-        protected virtual void SaveSitemapToFile(string filePath, string sitemap)
-        {
-            using (StreamWriter streamWriter = new StreamWriter((Stream)FileUtil.OpenCreate(filePath)))
-                streamWriter.Write(sitemap);
-        }
-
-        protected virtual void SetResponse(HttpResponseBase response, object content)
-        {
-            response.ContentType = "application/xml";
-            response.ContentEncoding = Encoding.UTF8;
-            response.Headers.Set("cache-control", this.GetCacheControlHeader().ToString());
-            response.Write(content);
-            response.End();
-        }
-
-        protected virtual CacheControlHeaderValue GetCacheControlHeader()
-        {
-            SitemapCachingHeadersConfiguration cacheControlHeader = this.Configuration.SitemapCacheControlHeader;
-            CacheControlHeaderValue controlHeaderValue = new CacheControlHeaderValue();
-            int? nullable1;
-            if (cacheControlHeader.MaxAge.HasValue && cacheControlHeader.MaxAge.Value >= 0)
-            {
-                CacheControlHeaderValue controlHeaderValue1 = controlHeaderValue;
-                nullable1 = cacheControlHeader.MaxAge;
-                TimeSpan? nullable2 = new TimeSpan?(TimeSpan.FromSeconds((double)nullable1.Value));
-                controlHeaderValue1.MaxAge = nullable2;
-            }
-            controlHeaderValue.MustRevalidate = cacheControlHeader.MustRevalidate;
-            controlHeaderValue.NoCache = cacheControlHeader.NoCache;
-            controlHeaderValue.NoStore = cacheControlHeader.NoStore;
-            controlHeaderValue.NoTransform = cacheControlHeader.NoTransform;
-            controlHeaderValue.Private = cacheControlHeader.Private;
-            controlHeaderValue.ProxyRevalidate = cacheControlHeader.ProxyRevalidate;
-            controlHeaderValue.Public = cacheControlHeader.Public;
-            nullable1 = cacheControlHeader.SharedMaxAge;
-            if (nullable1.HasValue)
-            {
-                nullable1 = cacheControlHeader.SharedMaxAge;
-                if (nullable1.Value >= 0)
-                {
-                    CacheControlHeaderValue controlHeaderValue2 = controlHeaderValue;
-                    nullable1 = cacheControlHeader.SharedMaxAge;
-                    TimeSpan? nullable3 = new TimeSpan?(TimeSpan.FromSeconds((double)nullable1.Value));
-                    controlHeaderValue2.SharedMaxAge = nullable3;
-                }
-            }
-            cacheControlHeader.NoCacheHeaders.ForEach((Action<string>)(noCacheHeader => controlHeaderValue.NoCacheHeaders.Add(noCacheHeader)));
-            cacheControlHeader.PrivateHeaders.ForEach((Action<string>)(privateHeader => controlHeaderValue.PrivateHeaders.Add(privateHeader)));
-            return controlHeaderValue;
         }
     }
 }

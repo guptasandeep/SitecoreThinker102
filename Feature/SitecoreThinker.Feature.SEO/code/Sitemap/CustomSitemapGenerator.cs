@@ -1,113 +1,46 @@
-using Microsoft.Extensions.DependencyInjection;
-using Sitecore.Data;
-using Sitecore.Data.Fields;
-using Sitecore.DependencyInjection;
-using Sitecore.Diagnostics;
-using Sitecore.Globalization;
-using Sitecore.Links;
+using Sitecore.Data.Items;
 using Sitecore.Links.UrlBuilders;
-using Sitecore.Security.Accounts;
-using Sitecore.XA.Feature.SiteMetadata.Enums;
-using Sitecore.XA.Foundation.Abstractions;
-using Sitecore.XA.Foundation.Multisite.Services;
-using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
-using Sitecore.XA.Foundation.SitecoreExtensions.Utils;
+using Sitecore.XA.Feature.SiteMetadata.Sitemap;
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
-using System.Threading.Tasks;
-using System.Web;
-using System.Xml;
+using Sitecore.Data;
+using Sitecore.Globalization;
+using Sitecore.Links;
+using Sitecore.Security.Accounts;
+using Sitecore.XA.Feature.SiteMetadata.Enums;
+using Sitecore.XA.Foundation.SitecoreExtensions.Extensions;
+using System.IO;
 using System.Xml.Linq;
+using System.Collections;
+using System.Xml;
 
-namespace Sitecore.XA.Feature.SiteMetadata.Sitemap
+namespace SitecoreThinker.Feature.SEO.Sitemap
 {
-    public class SitemapGenerator : ISitemapGenerator
+    public class CustomSitemapGenerator : SitemapGenerator
     {
-        protected static XNamespace Xhtml { get; } = (XNamespace)"http://www.w3.org/1999/xhtml";
-
-        protected static XNamespace ns { get; } = (XNamespace)"http://www.sitemaps.org/schemas/sitemap/0.9";
-
-        public XmlWriterSettings XmlWriterSettings { set; get; }
-
-        protected IContext Context { get; } = ServiceProviderServiceExtensions.GetService<IContext>(ServiceLocator.ServiceProvider);
-
-        protected ILinkProviderService LinkProviderService { get; } = ServiceProviderServiceExtensions.GetService<ILinkProviderService>(ServiceLocator.ServiceProvider);
-
-        public SitemapGenerator() => this.XmlWriterSettings = new XmlWriterSettings()
+        public Hashtable GenerateSitemapIndex(Item homeItem, NameValueCollection externalSitemaps, SitemapLinkOptions sitemapLinkOptions)
         {
-            Encoding = Encoding.UTF8,
-            OmitXmlDeclaration = false
-        };
-
-        public SitemapGenerator(XmlWriterSettings xmlWriterSettings) => this.XmlWriterSettings = xmlWriterSettings;
-
-        public virtual string GenerateSitemap(Sitecore.Data.Items.Item homeItem, SitemapLinkOptions sitemapLinkOptions) => this.GenerateSitemap(homeItem, (NameValueCollection)null, sitemapLinkOptions);
-
-        public virtual string GenerateSitemap(
-          Sitecore.Data.Items.Item homeItem,
-          NameValueCollection externalSitemaps,
-          SitemapLinkOptions sitemapLinkOptions)
-        {
-            List<string> externalXmls = (List<string>)null;
-            Task task = (Task)null;
-            if (externalSitemaps != null && externalSitemaps.Count > 0)
+            Hashtable hashtable = this.BuildMultilanguageNestedSitemap(this.ChildrenSearch(homeItem).Where<Sitecore.Data.Items.Item>((Func<Sitecore.Data.Items.Item, bool>)(i => i.Security.CanRead((Account)this.Context.User))), sitemapLinkOptions);
+            NameValueCollection siteMapsURLs = new NameValueCollection();
+            siteMapsURLs.Merge(externalSitemaps);
+            foreach (var key in hashtable.Keys.Cast<string>().OrderBy(key => key).ToList()) //Prepares Sitemap index using the URLs of sitemaps
             {
-                task = new Task((Action)(() => this.DownloadExternalSitemaps(externalSitemaps, out externalXmls)));
-                task.Start();
+                var defaultUrlBuilderOptions = LinkManager.GetDefaultUrlBuilderOptions();
+                defaultUrlBuilderOptions.AlwaysIncludeServerUrl = true;
+                siteMapsURLs.Add((string)key, $"{LinkManager.GetItemUrl(Sitecore.Context.Database.GetItem(this.Context.Site.StartPath), defaultUrlBuilderOptions)}{Convert.ToString(key)}");
             }
-            StringBuilder xml = this.BuildMultilanguageSitemap(this.ChildrenSearch(homeItem).Where<Sitecore.Data.Items.Item>((Func<Sitecore.Data.Items.Item, bool>)(i => i.Security.CanRead((Account)this.Context.User))), sitemapLinkOptions);
-            task?.Wait();
-            if (externalXmls != null && externalXmls.Count > 0)
-            {
-                string str = this.JoinXmls(xml.ToString(), (IEnumerable<string>)externalXmls);
-                xml.Clear();
-                xml.Append(str);
-            }
-            return this.FixEncoding(xml);
+            hashtable["sitemap.xml"] = BuildSitemapIndex(siteMapsURLs);
+            return hashtable;
         }
 
-        public virtual string BuildSitemapIndex(NameValueCollection externalSitemaps)
+        protected Hashtable BuildMultilanguageNestedSitemap(
+            IEnumerable<Sitecore.Data.Items.Item> childrenTree,
+            SitemapLinkOptions options)
         {
-            StringBuilder stringBuilder = new StringBuilder();
-            bool flag = true;
-            using (XmlWriter xmlWriter = XmlWriter.Create(stringBuilder, this.XmlWriterSettings))
-            {
-                xmlWriter.WriteStartDocument(true);
-                xmlWriter.WriteStartElement("sitemapindex", "http://www.sitemaps.org/schemas/sitemap/0.9");
-                foreach (string key in externalSitemaps.Keys)
-                {
-                    string url = HttpUtility.UrlDecode(externalSitemaps[key]);
-                    if (!string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(url) && UrlUtils.IsValidUrl(url))
-                    {
-                        xmlWriter.WriteStartElement("sitemap");
-                        xmlWriter.WriteElementString("loc", url);
-                        xmlWriter.WriteEndElement();
-                        xmlWriter.Flush();
-                        if (flag)
-                        {
-                            flag = false;
-                            this.FixDeclaration(stringBuilder);
-                        }
-                    }
-                }
-                xmlWriter.WriteEndElement();
-                xmlWriter.WriteEndDocument();
-                xmlWriter.Flush();
-            }
-            return this.FixEncoding(stringBuilder);
-        }
-
-        protected virtual ItemUrlBuilderOptions GetUrlOptions() => (ItemUrlBuilderOptions)this.LinkProviderService.GetLinkProvider(this.Context.Site).GetDefaultUrlBuilderOptions();
-
-        protected virtual StringBuilder BuildMultilanguageSitemap(
-          IEnumerable<Sitecore.Data.Items.Item> childrenTree,
-          SitemapLinkOptions options)
-        {
+            Hashtable hashtable = new Hashtable();
             ItemUrlBuilderOptions urlOptions1 = this.GetUrlOptions();
             SitemapLinkOptions options1 = new SitemapLinkOptions(options.Scheme, urlOptions1, options.TargetHostname);
             ItemUrlBuilderOptions urlOptions2 = (ItemUrlBuilderOptions)urlOptions1.Clone();
@@ -119,20 +52,27 @@ namespace Sitecore.XA.Feature.SiteMetadata.Sitemap
             List<XElement> pages = new List<XElement>();
             LanguageEmbedding? languageEmbedding = options1.UrlOptions.LanguageEmbedding;
             HashSet<ID> idSet = new HashSet<ID>();
-            foreach (Sitecore.Data.Items.Item obj1 in childrenTree)
+            foreach (Item obj1 in childrenTree)
             {
+                if (IsItemNoIndexedMarked(obj1))
+                    continue;
+
                 SitemapChangeFrequency sitemapChangeFrequency = obj1.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._Sitemap.Fields.ChangeFrequency].ToEnum<SitemapChangeFrequency>();
                 if (sitemapChangeFrequency != SitemapChangeFrequency.DoNotInclude)
                 {
                     List<XElement> alternateUrls = new List<XElement>();
                     foreach (Language language in obj1.Languages)
                     {
-                        Sitecore.Data.Items.Item obj2 = obj1.Database.GetItem(obj1.ID, language);
+                        Item obj2 = obj1.Database.GetItem(obj1.ID, language);
                         if (obj2 != null && obj2.Versions.Count > 0)
                         {
                             options2.UrlOptions.Language = language;
-                            XElement xelement = this.BuildAlternateLinkElement(this.GetFullLink(obj2, options2), language.CultureInfo.Name);
-                            alternateUrls.Add(xelement);
+                            string fullLink = this.GetFullLink(obj2, options2);
+                            if (!IsDisallowedInRobotstxt(fullLink))
+                            {
+                                XElement xelement = this.BuildAlternateLinkElement(fullLink, language.CultureInfo.Name);
+                                alternateUrls.Add(xelement);
+                            }
                         }
                     }
                     if (alternateUrls.Count == 1)
@@ -146,8 +86,12 @@ namespace Sitecore.XA.Feature.SiteMetadata.Sitemap
                     else if (alternateUrls.Count >= 2)
                     {
                         options1.UrlOptions.LanguageEmbedding = new LanguageEmbedding?(LanguageEmbedding.Always);
-                        XElement xelement = this.BuildAlternateLinkElement(this.GetFullLink(obj1, options3), "x-default");
-                        alternateUrls.Insert(0, xelement);
+                        string fullLink = this.GetFullLink(obj1, options3);
+                        if (!IsDisallowedInRobotstxt(fullLink))
+                        {
+                            XElement xelement = this.BuildAlternateLinkElement(fullLink, "x-default");
+                            alternateUrls.Insert(0, xelement);
+                        }
                     }
                     options1.UrlOptions.Language = obj1.Language;
                     string fullLink1 = this.GetFullLink(obj1, options1);
@@ -158,200 +102,277 @@ namespace Sitecore.XA.Feature.SiteMetadata.Sitemap
                     {
                         options1.UrlOptions.LanguageEmbedding = new LanguageEmbedding?(LanguageEmbedding.Never);
                         string fullLink2 = this.GetFullLink(obj1, options1);
-                        pages.Add(this.BuildPageElement(fullLink2, updatedDate, lowerInvariant, priority, (IEnumerable<XElement>)alternateUrls));
+                        if (!IsDisallowedInRobotstxt(fullLink2))
+                            pages.Add(this.BuildPageElement(fullLink2, updatedDate, lowerInvariant, priority, (IEnumerable<XElement>)alternateUrls));
                         idSet.Add(obj1.ID);
                     }
-                    XElement xelement1 = this.BuildPageElement(fullLink1, updatedDate, lowerInvariant, priority, (IEnumerable<XElement>)alternateUrls);
-                    pages.Add(xelement1);
+                    if (!IsDisallowedInRobotstxt(fullLink1))
+                    {
+                        XElement xelement1 = this.BuildPageElement(fullLink1, updatedDate, lowerInvariant, priority, (IEnumerable<XElement>)alternateUrls);
+                        pages.Add(xelement1);
+                    }
                 }
             }
-            XDocument xdocument = this.BuildXmlDocument((IEnumerable<XElement>)pages);
+
+            int sitemapCount = (int)Math.Ceiling((double)pages.Count / SiteMapValidator.MaxURLsPerSiteMap);
+
+            for (int i = 0; i < sitemapCount; i++)
+            {
+                List<XElement> sitemapUrls = pages.Skip(i * SiteMapValidator.MaxURLsPerSiteMap).Take(SiteMapValidator.MaxURLsPerSiteMap).ToList();
+                string sitemapPath = $"sitemap{i + 1}.xml";
+
+                PrepareSiteMap(hashtable, sitemapUrls, sitemapPath);
+            }
+            return hashtable;
+        }
+
+        private void PrepareSiteMap(Hashtable hashtable, List<XElement> sitemapUrls, string sitemapPath)
+        {
+            XDocument xdocument = this.BuildXmlDocument((IEnumerable<XElement>)sitemapUrls);
             StringBuilder stringBuilder = new StringBuilder();
             using (TextWriter textWriter = (TextWriter)new StringWriter(stringBuilder))
                 xdocument.Save(textWriter);
             this.FixDeclaration(stringBuilder);
-            return stringBuilder;
-        }
-
-        protected virtual XDocument BuildXmlDocument(IEnumerable<XElement> pages) => new XDocument(new XDeclaration("1.0", "UTF-8", "no"), new object[1]
-        {
-      (object) new XElement(SitemapGenerator.ns + "urlset", new object[2]
-      {
-        (object) new XAttribute(XNamespace.Xmlns + "xhtml", (object) (XNamespace) "http://www.w3.org/1999/xhtml"),
-        (object) pages
-      })
-        });
-
-        protected virtual XElement BuildAlternateLinkElement(
-          string href,
-          string hreflang,
-          string rel = "alternate")
-        {
-            return new XElement(SitemapGenerator.Xhtml + "link", new object[3]
+            string nestedSiteMap = this.FixEncoding(stringBuilder);
+            if (SiteMapValidator.IsSiteMapSizeValid(nestedSiteMap))
+                hashtable[sitemapPath] = nestedSiteMap;
+            else
             {
-        (object) new XAttribute((XName) nameof (rel), (object) rel),
-        (object) new XAttribute((XName) nameof (hreflang), (object) hreflang),
-        (object) new XAttribute((XName) nameof (href), (object) href)
-            });
+                string[] nestedSiteMaps = SplitSitemap(nestedSiteMap).ToArray();
+                for (int i = 0; i < nestedSiteMaps.Length; i++)
+                {
+                    hashtable[$"{sitemapPath.Replace(".xml", $"_{i + 1}.xml")}"] = nestedSiteMaps[i];
+                }
+            }
         }
 
-        protected virtual XElement BuildPageElement(
-          string loc,
-          string lastmod,
-          string changefreq,
-          string priority,
-          IEnumerable<XElement> alternateUrls)
+        public List<string> SplitSitemap(string originalSitemap)
         {
-            return new XElement(SitemapGenerator.ns + "url", new object[5]
+            //return the same original sitemap back if its size is within the given limit 
+            List<string> sitemapSegments = new List<string>();
+            if (Encoding.UTF8.GetBytes(originalSitemap).Length <= SiteMapValidator.MaxSiteMapSizeInBytes)
             {
-        (object) new XElement(SitemapGenerator.ns + nameof (loc), (object) loc),
-        (object) new XElement(SitemapGenerator.ns + nameof (lastmod), (object) lastmod),
-        (object) new XElement(SitemapGenerator.ns + nameof (changefreq), (object) changefreq),
-        (object) new XElement(SitemapGenerator.ns + nameof (priority), (object) priority),
-        (object) alternateUrls
-            });
+                sitemapSegments.Add(originalSitemap);
+                return sitemapSegments;
+            }
+
+            //If not within the size limit, split it.
+            StringBuilder currentSegment = new StringBuilder();
+            long currentSize = 0;
+
+            using (StringReader stringReader = new StringReader(originalSitemap))
+            using (XmlReader xmlReader = XmlReader.Create(stringReader))
+            {
+                while (xmlReader.Read())
+                {
+                    if (xmlReader.NodeType == XmlNodeType.Element && xmlReader.Name == "urlset")
+                    {
+                        if (currentSegment.Length > 0)
+                        {
+                            // Close the previous <urlset> tag
+                            currentSegment.AppendLine("</urlset>");
+                            sitemapSegments.Add(currentSegment.ToString());
+                            currentSegment.Clear();
+                            currentSize = 0;
+                        }
+                        currentSegment.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>");
+                        currentSegment.AppendLine("<urlset xmlns:xhtml=\"http://www.w3.org/1999/xhtml\" xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">");
+                        // Update the size with the length of the new elements
+                        currentSize += Encoding.UTF8.GetBytes(currentSegment.ToString()).Length;
+                    }
+                    else if (xmlReader.NodeType == XmlNodeType.Element && xmlReader.Name == "url")
+                    {
+                        if (currentSegment.Length == 0)
+                        {
+                            throw new InvalidOperationException("Invalid sitemap structure");
+                        }
+
+                        string urlElement = xmlReader.ReadOuterXml();
+                        // Calculate the size of the new URL element, including existing elements
+                        int urlSizeInBytes = Encoding.UTF8.GetBytes(urlElement).Length;
+                        long newSize = currentSize + urlSizeInBytes;
+
+                        if (newSize + "</urlset>".Length > SiteMapValidator.MaxSiteMapSizeInBytes)
+                        {
+                            // Close the previous <urlset> tag
+                            currentSegment.AppendLine("</urlset>");
+                            sitemapSegments.Add(currentSegment.ToString());
+                            currentSegment.Clear();
+                            currentSize = 0;
+
+                            // Start a new <urlset> tag
+                            currentSegment.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>");
+                            currentSegment.AppendLine("<urlset xmlns:xhtml=\"http://www.w3.org/1999/xhtml\" xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">");
+                            currentSize += Encoding.UTF8.GetBytes(currentSegment.ToString()).Length;
+                        }
+
+                        currentSegment.AppendLine(urlElement);
+                        currentSize += urlSizeInBytes;
+                    }
+                }
+            }
+
+            if (currentSegment.Length > 0)
+            {
+                // Close the last <urlset> tag
+                currentSegment.AppendLine("</urlset>");
+                sitemapSegments.Add(currentSegment.ToString());
+            }
+
+            return sitemapSegments;
         }
 
-        protected virtual StringBuilder BuildSitemap(
-          IEnumerable<Sitecore.Data.Items.Item> childrenTree,
-          SitemapLinkOptions options)
+        //override the existing method to filter the pages with no-index and if disallwed in the robots.txt
+        protected override StringBuilder BuildMultilanguageSitemap(IEnumerable<Item> childrenTree, SitemapLinkOptions options)
         {
+            ItemUrlBuilderOptions urlOptions = GetUrlOptions();
+            SitemapLinkOptions sitemapLinkOptions = new SitemapLinkOptions(options.Scheme, urlOptions, options.TargetHostname);
+            ItemUrlBuilderOptions itemUrlBuilderOptions = (ItemUrlBuilderOptions)urlOptions.Clone();
+            itemUrlBuilderOptions.LanguageEmbedding = LanguageEmbedding.Always;
+            SitemapLinkOptions sitemapLinkOptions2 = new SitemapLinkOptions(options.Scheme, itemUrlBuilderOptions, options.TargetHostname);
+            ItemUrlBuilderOptions itemUrlBuilderOptions2 = (ItemUrlBuilderOptions)sitemapLinkOptions2.UrlOptions.Clone();
+            itemUrlBuilderOptions2.LanguageEmbedding = LanguageEmbedding.Never;
+            SitemapLinkOptions options2 = new SitemapLinkOptions(options.Scheme, itemUrlBuilderOptions2, options.TargetHostname);
+            List<XElement> list = new List<XElement>();
+            _ = sitemapLinkOptions.UrlOptions.LanguageEmbedding;
+            HashSet<ID> hashSet = new HashSet<ID>();
+            foreach (Item item5 in childrenTree)
+            {
+                if (IsItemNoIndexedMarked(item5))
+                    continue;
+
+                SitemapChangeFrequency sitemapChangeFrequency = item5.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._Sitemap.Fields.ChangeFrequency].ToEnum<SitemapChangeFrequency>();
+                if (sitemapChangeFrequency == SitemapChangeFrequency.DoNotInclude)
+                {
+                    continue;
+                }
+
+                List<XElement> list2 = new List<XElement>();
+                Language[] languages = item5.Languages;
+                foreach (Language language in languages)
+                {
+                    Item item = item5.Database.GetItem(item5.ID, language);
+                    if (item != null && item.Versions.Count > 0)
+                    {
+                        sitemapLinkOptions2.UrlOptions.Language = language;
+                        string fullLink = GetFullLink(item, sitemapLinkOptions2);
+                        string name = language.CultureInfo.Name;
+                        if (!IsDisallowedInRobotstxt(fullLink))
+                        {
+                            XElement item2 = BuildAlternateLinkElement(fullLink, name);
+                            list2.Add(item2);
+                        }
+                    }
+                }
+
+                if (list2.Count == 1)
+                {
+                    if (Context.Site.Language == item5.Language.Name)
+                    {
+                        sitemapLinkOptions.UrlOptions.LanguageEmbedding = LanguageEmbedding.Never;
+                    }
+                    else
+                    {
+                        sitemapLinkOptions.UrlOptions.LanguageEmbedding = LanguageEmbedding.Always;
+                    }
+
+                    list2.Clear();
+                }
+                else if (list2.Count >= 2)
+                {
+                    sitemapLinkOptions.UrlOptions.LanguageEmbedding = LanguageEmbedding.Always;
+                    string fullLink2 = GetFullLink(item5, options2);
+                    string hreflang = "x-default";
+                    if (!IsDisallowedInRobotstxt(fullLink2))
+                    {
+                        XElement item3 = BuildAlternateLinkElement(fullLink2, hreflang);
+                        list2.Insert(0, item3);
+                    }
+                }
+
+                sitemapLinkOptions.UrlOptions.Language = item5.Language;
+                string fullLink3 = GetFullLink(item5, sitemapLinkOptions);
+                string updatedDate = GetUpdatedDate(item5);
+                string changefreq = sitemapChangeFrequency.ToString().ToLowerInvariant();
+                string priority = GetPriority(item5);
+                if (list2.Count >= 2 && !hashSet.Contains(item5.ID))
+                {
+                    sitemapLinkOptions.UrlOptions.LanguageEmbedding = LanguageEmbedding.Never;
+                    string fullLink4 = GetFullLink(item5, sitemapLinkOptions);
+                    if (!IsDisallowedInRobotstxt(fullLink4))
+                        list.Add(BuildPageElement(fullLink4, updatedDate, changefreq, priority, list2));
+                    hashSet.Add(item5.ID);
+                }
+
+                if (!IsDisallowedInRobotstxt(fullLink3))
+                {
+                    XElement item4 = BuildPageElement(fullLink3, updatedDate, changefreq, priority, list2);
+                    list.Add(item4);
+                }
+            }
+
+            XDocument xDocument = BuildXmlDocument(list);
             StringBuilder stringBuilder = new StringBuilder();
-            bool flag = true;
-            using (XmlWriter xmlWriter = XmlWriter.Create(stringBuilder, this.XmlWriterSettings))
+            using (TextWriter textWriter = new StringWriter(stringBuilder))
             {
-                xmlWriter.WriteStartDocument(true);
-                xmlWriter.WriteStartElement("urlset", "http://www.sitemaps.org/schemas/sitemap/0.9");
-                foreach (Sitecore.Data.Items.Item obj in childrenTree)
-                {
-                    SitemapChangeFrequency sitemapChangeFrequency = obj.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._Sitemap.Fields.ChangeFrequency].ToEnum<SitemapChangeFrequency>();
-                    if (sitemapChangeFrequency != SitemapChangeFrequency.DoNotInclude)
-                    {
-                        xmlWriter.WriteStartElement("url");
-                        xmlWriter.WriteElementString("loc", this.GetFullLink(obj, options));
-                        xmlWriter.WriteElementString("lastmod", this.GetUpdatedDate(obj));
-                        xmlWriter.WriteElementString("changefreq", sitemapChangeFrequency.ToString());
-                        xmlWriter.WriteElementString("priority", this.GetPriority(obj));
-                        xmlWriter.WriteEndElement();
-                        xmlWriter.Flush();
-                        if (flag)
-                        {
-                            flag = false;
-                            this.FixDeclaration(stringBuilder);
-                        }
-                    }
-                }
-                xmlWriter.WriteEndElement();
-                xmlWriter.WriteEndDocument();
-                xmlWriter.Flush();
+                xDocument.Save(textWriter);
             }
+
+            FixDeclaration(stringBuilder);
             return stringBuilder;
         }
-
-        protected virtual string GetFullLink(Sitecore.Data.Items.Item item, SitemapLinkOptions options)
+        public List<string> RobotstxtDisallowedPaths { get; set; }
+        private bool IsDisallowedInRobotstxt(string fullURL)
         {
-            string uriString = LinkManager.GetItemUrl(item, options.UrlOptions);
-            if (!uriString.StartsWith("/", StringComparison.Ordinal))
-                uriString = new Uri(uriString).LocalPath;
-            return options.Scheme + Uri.SchemeDelimiter + options.TargetHostname + uriString;
-        }
+            if (string.IsNullOrEmpty(fullURL))
+                return false;
 
-        protected virtual string GetUpdatedDate(Sitecore.Data.Items.Item item) => string.Format("{0:yyyy-MM-dd}", (object)item.Statistics.Updated);
-
-        protected virtual string GetPriority(Sitecore.Data.Items.Item item) => this.Context.Database.GetItem(((ReferenceField)item.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._Sitemap.Fields.Priority]).TargetID).Fields[Sitecore.XA.Foundation.Common.Templates.Enum.Fields.Value].Value;
-
-        protected virtual void DownloadExternalSitemaps(
-          NameValueCollection externalSitemaps,
-          out List<string> externalXml)
-        {
-            externalXml = new List<string>();
-            using (WebClient webClient = new WebClient())
+            if (RobotstxtDisallowedPaths == null)
             {
-                foreach (string key in externalSitemaps.Keys)
+                RobotstxtDisallowedPaths = new List<string>();
+                Item siteSettingItem = Sitecore.Context.Database.GetItem(Sitecore.Context.Site.StartPath.Replace("/Home", "/Settings"));
+
+                string robotstxtcontent = siteSettingItem["RobotsContent"];
+                if (!string.IsNullOrWhiteSpace(robotstxtcontent))
                 {
-                    string externalSitemap = externalSitemaps[key];
-                    if (!string.IsNullOrEmpty(externalSitemap))
+                    string[] robotstxtlines = robotstxtcontent.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var robotstxtline in robotstxtlines)
                     {
-                        if (UrlUtils.IsValidUrl(externalSitemap))
+                        if (robotstxtline.Trim().StartsWith("Disallow: ") && robotstxtline.IndexOf("/") > -1)
                         {
-                            try
+                            string path = robotstxtline.Substring(robotstxtline.IndexOf("/")).Trim();
+                            if (!string.IsNullOrWhiteSpace(path))
                             {
-                                string str = webClient.DownloadString(externalSitemap);
-                                externalXml.Add(str);
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Error("Could not download sxternal sitemap for key=" + key, ex, (object)this);
+                                RobotstxtDisallowedPaths.Add(path);
                             }
                         }
                     }
                 }
             }
-        }
 
-        protected virtual IList<Sitecore.Data.Items.Item> ChildrenSearch(Sitecore.Data.Items.Item homeItem)
-        {
-            List<Sitecore.Data.Items.Item> objList = new List<Sitecore.Data.Items.Item>();
-            Queue<Sitecore.Data.Items.Item> objQueue = new Queue<Sitecore.Data.Items.Item>();
-            if (homeItem.HasChildren)
+            if (!fullURL.EndsWith("/"))
+                fullURL = fullURL + "/";
+
+            string relativePath = new Uri(fullURL).LocalPath;
+            foreach (var robotstxtDisallowedPath in RobotstxtDisallowedPaths)
             {
-                objQueue.Enqueue(homeItem);
-                if (homeItem.Versions.Count > 0)
-                    objList.Add(homeItem);
-                objList.AddRange(this.GetItemsForOtherLanguages(homeItem));
-                while (objQueue.Count != 0)
+                if (robotstxtDisallowedPath.EndsWith("/"))
                 {
-                    foreach (Sitecore.Data.Items.Item child in objQueue.Dequeue().Children)
-                    {
-                        if (!objList.Contains(child))
-                        {
-                            if (!this.ShouldBeSkipped(child))
-                            {
-                                if (child.Versions.Count > 0)
-                                    objList.Add(child);
-                                objList.AddRange(this.GetItemsForOtherLanguages(child));
-                            }
-                            if (!child.InheritsFrom(Sitecore.XA.Foundation.LocalDatasources.Templates.PageData.ID) && child.HasChildren)
-                                objQueue.Enqueue(child);
-                        }
-                    }
+                    if (relativePath.Replace("/en/", "/").ToLower().Equals(robotstxtDisallowedPath.ToLower()))
+                        return true;
+                }
+                else if (relativePath.Replace("/en/", "/").ToLower().StartsWith(robotstxtDisallowedPath.ToLower()))
+                {
+                    return true;
                 }
             }
-            return (IList<Sitecore.Data.Items.Item>)objList;
+
+            return false;
         }
 
-        protected virtual IEnumerable<Sitecore.Data.Items.Item> GetItemsForOtherLanguages(
-          Sitecore.Data.Items.Item item)
+        private bool IsItemNoIndexedMarked(Item item)
         {
-            foreach (Language language in ((IEnumerable<Language>)item.Languages).Where<Language>((Func<Language, bool>)(language => language != item.Language)))
-            {
-                Sitecore.Data.Items.Item obj = item.Database.GetItem(item.ID, language);
-                if (obj != null && obj.Versions.Count > 0)
-                    yield return obj;
-            }
-        }
-
-        protected virtual void FixDeclaration(StringBuilder xml) => xml.Replace("utf-16", "utf-8").Replace("UTF-16", "utf-8");
-
-        protected virtual string FixEncoding(StringBuilder xml) => Encoding.UTF8.GetString(Encoding.Convert(Encoding.Unicode, Encoding.UTF8, Encoding.Unicode.GetBytes(xml.ToString())));
-
-        protected virtual bool ShouldBeSkipped(Sitecore.Data.Items.Item item) => !item.DoesItemInheritFrom(Sitecore.XA.Foundation.Multisite.Templates.Page.ID) || string.IsNullOrEmpty(item.Fields[Sitecore.XA.Feature.SiteMetadata.Templates.Sitemap._Sitemap.Fields.Priority]?.Value);
-
-        protected virtual string JoinXmls(string baseXml, IEnumerable<string> xmlsToAdd)
-        {
-            XDocument xdocument1 = XDocument.Parse(baseXml);
-            xdocument1.Declaration = new XDeclaration("1.0", "UTF-8", "yes");
-            foreach (XDocument xdocument2 in xmlsToAdd.Select<string, XDocument>(new Func<string, XDocument>(XDocument.Parse)))
-            {
-                if (xdocument1.Root != null && xdocument2.Root != null)
-                    xdocument1.Root.Add((object)xdocument2.Root.Elements());
-            }
-            MemoryStream memoryStream = new MemoryStream();
-            using (StreamWriter streamWriter = new StreamWriter((Stream)memoryStream, Encoding.UTF8, 1024, true))
-                xdocument1.Save((TextWriter)streamWriter);
-            memoryStream.Seek(0L, SeekOrigin.Begin);
-            using (StreamReader streamReader = new StreamReader((Stream)memoryStream))
-                return streamReader.ReadToEnd();
+            return item["Meta Robots NOINDEX"] == "1";
         }
     }
 }

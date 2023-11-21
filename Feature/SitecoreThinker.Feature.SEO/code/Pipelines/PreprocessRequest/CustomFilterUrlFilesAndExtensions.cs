@@ -1,14 +1,18 @@
+using SitecoreThinker.Feature.SEO.Sitemap;
 using Microsoft.Extensions.DependencyInjection;
 using Sitecore.DependencyInjection;
 using Sitecore.Diagnostics;
 using Sitecore.Pipelines.PreprocessRequest;
 using Sitecore.XA.Foundation.Abstractions.Configuration;
+using Sitecore.XA.Foundation.SitecoreExtensions;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Web;
 
-namespace Sitecore.XA.Foundation.SitecoreExtensions.Pipelines.PreprocessRequest
+
+namespace SitecoreThinker.Feature.SEO.Pipelines.PreprocessRequest
 {
     public class FilterUrlFilesAndExtensions : FilterUrlExtensions
     {
@@ -24,7 +28,10 @@ namespace Sitecore.XA.Foundation.SitecoreExtensions.Pipelines.PreprocessRequest
         public override void Process(PreprocessRequestArgs args)
         {
             string requestFilePath = this.GetRequestFilePath();
-            if (ServiceLocator.ServiceProvider.GetService<IConfiguration<SitecoreExtensionsConfiguration>>().GetConfiguration().AllowedFileNames.Contains<string>(requestFilePath))
+            IEnumerable<string> AllowedFileNames = ServiceLocator.ServiceProvider.GetService<IConfiguration<SitecoreExtensionsConfiguration>>().GetConfiguration().AllowedFileNames;
+            if (AllowedFileNames.Contains<string>(requestFilePath))
+                return;
+            if (SiteMapValidator.IsNestedSiteMap(HttpContext.Current.Request.Url.PathAndQuery)) //check for the nested sitemap files
                 return;
             base.Process(args);
         }
