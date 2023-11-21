@@ -158,7 +158,6 @@ namespace SitecoreThinker.Feature.SEO.Sitemap
 
             //If not within the size limit, split it.
             StringBuilder currentSegment = new StringBuilder();
-            long currentSize = 0;
 
             using (StringReader stringReader = new StringReader(originalSitemap))
             using (XmlReader xmlReader = XmlReader.Create(stringReader))
@@ -173,12 +172,9 @@ namespace SitecoreThinker.Feature.SEO.Sitemap
                             currentSegment.AppendLine("</urlset>");
                             sitemapSegments.Add(currentSegment.ToString());
                             currentSegment.Clear();
-                            currentSize = 0;
                         }
                         currentSegment.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>");
                         currentSegment.AppendLine("<urlset xmlns:xhtml=\"http://www.w3.org/1999/xhtml\" xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">");
-                        // Update the size with the length of the new elements
-                        currentSize += Encoding.UTF8.GetBytes(currentSegment.ToString()).Length;
                     }
                     else if (xmlReader.NodeType == XmlNodeType.Element && xmlReader.Name == "url")
                     {
@@ -189,25 +185,25 @@ namespace SitecoreThinker.Feature.SEO.Sitemap
 
                         string urlElement = xmlReader.ReadOuterXml();
                         // Calculate the size of the new URL element, including existing elements
-                        int urlSizeInBytes = Encoding.UTF8.GetBytes(urlElement).Length;
-                        long newSize = currentSize + urlSizeInBytes;
+                        StringBuilder tempCurrentSegment = new StringBuilder();
+                        tempCurrentSegment.Append(currentSegment);
+                        tempCurrentSegment.AppendLine(urlElement);
+                        tempCurrentSegment.AppendLine("</urlset>");
 
-                        if (newSize + "</urlset>".Length > SiteMapValidator.MaxSiteMapSizeInBytes)
+                        if (Encoding.UTF8.GetBytes(tempCurrentSegment.ToString()).Length > SiteMapValidator.MaxSiteMapSizeInBytes)
                         {
                             // Close the previous <urlset> tag
                             currentSegment.AppendLine("</urlset>");
                             sitemapSegments.Add(currentSegment.ToString());
                             currentSegment.Clear();
-                            currentSize = 0;
+                            tempCurrentSegment.Clear();
 
                             // Start a new <urlset> tag
                             currentSegment.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"no\"?>");
                             currentSegment.AppendLine("<urlset xmlns:xhtml=\"http://www.w3.org/1999/xhtml\" xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">");
-                            currentSize += Encoding.UTF8.GetBytes(currentSegment.ToString()).Length;
                         }
 
                         currentSegment.AppendLine(urlElement);
-                        currentSize += urlSizeInBytes;
                     }
                 }
             }
