@@ -317,53 +317,24 @@ namespace SitecoreThinker.Feature.SEO.Sitemap
             FixDeclaration(stringBuilder);
             return stringBuilder;
         }
-        public List<string> RobotstxtDisallowedPaths { get; set; }
+
+        private string _robotstxtcontent = string.Empty;
+        public string Robotstxtcontent
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_robotstxtcontent))
+                    _robotstxtcontent = Sitecore.Context.Database.GetItem(Sitecore.Context.Site.StartPath.Replace("/Home", "/Settings"))["RobotsContent"];
+                return _robotstxtcontent;
+            }
+        }
+
         private bool IsDisallowedInRobotstxt(string fullURL)
         {
             if (string.IsNullOrEmpty(fullURL))
                 return false;
 
-            if (RobotstxtDisallowedPaths == null)
-            {
-                RobotstxtDisallowedPaths = new List<string>();
-                Item siteSettingItem = Sitecore.Context.Database.GetItem(Sitecore.Context.Site.StartPath.Replace("/Home", "/Settings"));
-
-                string robotstxtcontent = siteSettingItem["RobotsContent"];
-                if (!string.IsNullOrWhiteSpace(robotstxtcontent))
-                {
-                    string[] robotstxtlines = robotstxtcontent.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var robotstxtline in robotstxtlines)
-                    {
-                        if (robotstxtline.Trim().StartsWith("Disallow: ") && robotstxtline.IndexOf("/") > -1)
-                        {
-                            string path = robotstxtline.Substring(robotstxtline.IndexOf("/")).Trim();
-                            if (!string.IsNullOrWhiteSpace(path))
-                            {
-                                RobotstxtDisallowedPaths.Add(path);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (!fullURL.EndsWith("/"))
-                fullURL = fullURL + "/";
-
-            string relativePath = new Uri(fullURL).LocalPath;
-            foreach (var robotstxtDisallowedPath in RobotstxtDisallowedPaths)
-            {
-                if (robotstxtDisallowedPath.EndsWith("/"))
-                {
-                    if (relativePath.Replace("/en/", "/").ToLower().Equals(robotstxtDisallowedPath.ToLower()))
-                        return true;
-                }
-                else if (relativePath.Replace("/en/", "/").ToLower().StartsWith(robotstxtDisallowedPath.ToLower()))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return RobotTxtChecker.IsUrlDisallowed(Robotstxtcontent, fullURL);
         }
 
         private bool IsItemNoIndexedMarked(Item item)

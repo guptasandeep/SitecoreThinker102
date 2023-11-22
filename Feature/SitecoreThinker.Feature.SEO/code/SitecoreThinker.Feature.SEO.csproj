@@ -163,6 +163,7 @@
     <Compile Include="Pipelines\PreprocessRequest\CustomFilterUrlFilesAndExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Sitemap\CustomSitemapGenerator.cs" />
+    <Compile Include="Sitemap\RobotTxtChecker.cs" />
     <Compile Include="Sitemap\SiteMapValidator.cs" />
   </ItemGroup>
   <ItemGroup>
