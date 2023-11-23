@@ -9,55 +9,46 @@ namespace SitecoreThinker.Feature.SEO.Sitemap
         {
             try
             {
-                // Split the content into lines
-                string[] lines = robotsTxtContent.Split('\n');
-
-                // Parse the URL to get the absolute path
-                Uri urlUri = new Uri(urlToCheck);
+                if (string.IsNullOrEmpty(robotsTxtContent))  // If the robots.txt content is null or empty, assume crawling is allowed
+                {
+                    return false;
+                }
+                Uri urlUri = new Uri(urlToCheck); // Parse the URL to get the absolute path
                 string urlAbsolutePath = urlUri.AbsolutePath;
 
-                // Check each line for disallow directives
+                string[] lines = robotsTxtContent.Split('\n');
+
                 foreach (string line in lines)
                 {
                     if (line.Trim().StartsWith("Disallow:", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Extract the path after "Disallow:"
                         string disallowedPath = line.Substring("Disallow:".Length).Trim();
+                        string regexPattern = WildcardToRegex(disallowedPath);  // Convert the disallowed path to a regex pattern
 
-                        // Convert the disallowed path to a regex pattern
-                        string regexPattern = WildcardToRegex(disallowedPath);
-
-                        // Check if the URL matches the regex pattern
-                        if (Regex.IsMatch(urlAbsolutePath, regexPattern, RegexOptions.IgnoreCase))
+                        if (Regex.IsMatch(urlAbsolutePath, regexPattern, RegexOptions.IgnoreCase)) // Check if the URL matches the regex pattern
                         {
-                            return true; // URL is disallowed
+                            return true; // Crawling is disallowed
                         }
                     }
                 }
+                return false; // If no Disallow rule matches, assume crawling is allowed
             }
             catch (Exception ex)
             {
-                Sitecore.Diagnostics.Log.Error($"Error occured in IsUrlDisallowed() of RobotTxtChecker: {ex.Message}", ex, typeof(RobotTxtChecker));
+                Console.WriteLine($"Error occurred in IsUrlDisallowed(): {ex.Message}");
+                return false;
             }
-
-            return false; // URL is not disallowed or an error occurred
         }
 
         private static string WildcardToRegex(string wildcard)
-        {
-            // Escape characters that have special meaning in regular expressions
-            string escapedWildcard = Regex.Escape(wildcard);
-
-            // Replace escaped asterisks with a pattern that matches any characters (non-greedy)
-            string regexPattern = escapedWildcard.Replace("\\*", ".*?");
-
-            // Handle trailing slash separately to allow for child pages
-            if (regexPattern.EndsWith("/"))
+        {            
+            string escapedWildcard = Regex.Escape(wildcard); // Escape characters that have special meaning in regular expressions
+            string regexPattern = escapedWildcard.Replace("\\*", ".*?"); // Replace escaped asterisks with a pattern that matches any characters (non-greedy)
+            if (regexPattern.EndsWith("/")) // Handle trailing slash separately to allow for child pages
             {
-                // If the pattern ends with a slash, allow for any characters or none after the slash
-                regexPattern = regexPattern.TrimEnd('/') + "(/.*)?";
+                // If the pattern ends with a slash, allow for no characters or any characters after the slash
+                regexPattern += "(.*)?";
             }
-
             return $"^{regexPattern}$";
         }
     }
