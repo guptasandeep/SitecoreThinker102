@@ -17,16 +17,13 @@ https://github.com/guptasandeep/SitecoreThinker102.git
 
 3. Deploy the files.
    In cloned repositories,
-- Copy all the binaries from https://github.com/guptasandeep/MapExtension2.0/tree/master/setup/bin_binaries to the Sitecore instance bin folder.
-- Copy Include folder from https://github.com/guptasandeep/MapExtension2.0/tree/master/setup/App_Config to the Sitecore instance App_Config folder.
-- Restore the Sitecore Master database .bacpac file from https://github.com/guptasandeep/MapExtension2.0/blob/master/Database/sitecorethinker1031_Master_29_Nov_2023.bacpac
+- Copy all the binaries from https://github.com/guptasandeep/SitecoreThinker102/tree/master/Setup/dll_Binaries to the Sitecore instance bin folder.
+- Copy the Include folder from https://github.com/guptasandeep/SitecoreThinker102/tree/master/Setup/App_Config to the Sitecore instance App_Config folder.
+- Restore the Sitecore Master database .bacpac file from https://github.com/guptasandeep/SitecoreThinker102/blob/master/Setup/Database/sitecorethinker102_Master_29_Nov_2023.bacpac
 - Update the connection strings accordingly.
-- Update the IIS Site bindings and host file for the local domain - sitecorethinker1031sc.dev.local.
-     - 127.0.0.1 sitecorethinker1031sc.dev.local
+- Update the IIS Site bindings and host file for the local domain - sitecorethinker102sc.dev.local.
+     - 127.0.0.1 sitecorethinker102sc.dev.local
 - Login to Sitecore
-     - Provide valid Google Map API key with Maps API, Places API, and Geocoding API services enabled.
-     - Ensure domain - sitecorethinker1031sc.dev.local is updated in Target Hostname and Hostname in /sitecore/content/demotenant/sitecorethinker/Settings/Site Grouping/sitecorethinker-cm.
-
-4. Publish all the items.
-
+     - Publish all the items.
+- Manage the Sitemap limits at /sitecore/content/SitecoreTenant/DemoSite/Settings/Sitemap Limits to test different cases.
    Test URL: https://sitecorethinker102sc.dev.local/sitemap.xml
