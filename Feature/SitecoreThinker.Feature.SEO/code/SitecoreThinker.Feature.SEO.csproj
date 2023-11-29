@@ -65,6 +65,10 @@
       <HintPath>..\..\..\packages\Sitecore.XA.Foundation.Abstractions.10.2.0\lib\net48\Sitecore.XA.Foundation.Abstractions.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="Sitecore.XA.Foundation.Multisite, Version=9.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\..\..\packages\Sitecore.XA.Foundation.Multisite.10.2.0\lib\net48\Sitecore.XA.Foundation.Multisite.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Sitecore.XA.Foundation.SitecoreExtensions, Version=9.0.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\..\..\packages\Sitecore.XA.Foundation.SitecoreExtensions.10.2.0\lib\net48\Sitecore.XA.Foundation.SitecoreExtensions.dll</HintPath>
       <Private>False</Private>
