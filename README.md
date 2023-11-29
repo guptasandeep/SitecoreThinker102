@@ -23,7 +23,7 @@ https://github.com/guptasandeep/SitecoreThinker102.git
 - Update the connection strings accordingly.
 - Update the IIS Site bindings and host file for the local domain - sitecorethinker102sc.dev.local.
      - 127.0.0.1 sitecorethinker102sc.dev.local
-- Login to Sitecore
+4. Login to Sitecore
      - Publish all the items.
 - Manage the Sitemap limits at /sitecore/content/SitecoreTenant/DemoSite/Settings/Sitemap Limits to test different cases.
    Test URL: https://sitecorethinker102sc.dev.local/sitemap.xml
